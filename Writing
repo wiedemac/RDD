@@ -1,1 +1,157 @@
 
+---
+title: "RDD Replication"
+author: "Chase Wiedemann"
+date: "2/24/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(kableExtra)
+library(rdd)
+source("bevo_functions.R")
+```
+
+## 2
+
+In this paper, Hansen looks to answer the question, do punishments deter future crime. His context is in DUI arrests and recidivism. For data, he uses over half a million DUI DUI stops. The identification strategy is a RDD where BAC is the cutoff. In the US, a BAC of .08 means you are guilty of drunk driving, but a .79999 means that you are off scott free. Hansens arguement is that people are not able to control their BAC to that degree, so there is not a real difference between a driver with a BAC of .08 and one with a BAC of .07, but this is an extreme difference in punishment. He finds that recieving a punishment for DUI reduces recidiism, and with his extended model that incorporates the type of punishment, he is able to estimate that a 10% increase in punishment is associated with a 2.3 percent decline in drunk driving.
+
+## 3
+
+```{r,echo = FALSE}
+dwi = read.csv("hansen_dwi.csv") %>%
+  mutate(drunk = ifelse(bac1 >= .08,1,0))
+
+```
+
+## 4
+
+```{r,echo = FALSE}
+ggplot(dwi,aes(x = bac1)) + geom_density(fill = "grey")+labs(x = "BAC", y = "Density")+geom_vline(xintercept = .08, color = "red")+annotate("text", label = "BAC = .08", x = .06, y = 6, angle = 90)
+```
+
+If one was able to manipulate their BAC, we would see grouping right before the .08 cutoff. To test for this, we could use a McCreary Density Test, which would find statistical differences in goruping patterns against the trend line. We do not see this in the data. We have no need to worry about grouping around the cutoff of .08. This is very similar to what Hansen found.
+
+## 5
+
+```{r,echo = FALSE}
+male = RDestimate(male~bac1, data = dwi, cutpoint = .08,bw = .05, kernel = "rectangular")
+white = RDestimate(white~bac1, data = dwi, cutpoint = .08,bw = .05, kernel = "rectangular")
+age = RDestimate(aged~bac1, data = dwi, cutpoint = .08,bw = .05, kernel = "rectangular")
+acc = RDestimate(acc~bac1, data = dwi, cutpoint = .08,bw = .05, kernel = "rectangular")
+
+table1 = matrix(NA,ncol = 4,nrow = 2)
+
+covars = list(male,white,age,acc)
+
+for (i in 1:length(covars)) {
+  var = covars[[i]]
+  
+  table1[1,i] = var$est[1]
+    table1[2,i] = var$se[1]
+}
+
+colnames(table1) = c("Male","White","Age","Accident")
+rownames(table1) = c("Estimate","Standard Error")
+kable(table1)
+```
+
+We see that the LATE effect is not statistically significant for all four of our covariates. Therefore we are balanced at the cutoff.
+
+## 6
+
+```{r,echo = FALSE}
+plot(male, range = c(0,.2)) + title(main = "Male",xlab = "BAC")
+plot(white, range = c(0,.2)) + title(main = "White",xlab = "BAC")
+plot(age, range = c(0,.2)) + title(main = "Age",xlab = "BAC")
+plot(acc, range = c(0,.2)) + title(main = "Accident",xlab = "BAC")
+```
+
+We find exactly what we found in the statistical tests. There is not a significant jump in any of the covariates at the cutoff. This is similar to what Hansen found.
+
+
+## 7
+
+```{r,echo = FALSE}
+
+dwi = dwi %>%
+  mutate(quad = bac1*bac1 + bac1)
+
+dwiA = dwi %>%
+  filter(bac1 > .03 & bac1 < .13)
+
+dwiB = dwi %>%
+  filter(bac1 >.055 & bac1 < .105)
+
+recid1A = r_lm(recidivism~bac1 + male+white+aged+acc,.data = dwiA)
+recid2A = RDestimate(recidivism~bac1 | male+white+aged+acc, data = dwiA, cutpoint = .08,bw = .05, kernel = "rectangular")
+recid3A = RDestimate(recidivism~ quad | male+white+aged+acc, data = dwiA, cutpoint = .08,bw = .05, kernel = "rectangular")
+
+recid1B = r_lm(recidivism~bac1 + male+white+aged+acc,.data = dwiB)
+recid2B = RDestimate(recidivism~bac1| male+white+aged+acc, data = dwiB, cutpoint = .08,bw = .05, kernel = "rectangular")
+recid3B = RDestimate(recidivism~ quad| male+white+aged+acc, data = dwiB, cutpoint = .08,bw = .05, kernel = "rectangular")
+
+
+table2 = matrix(NA,ncol = 3, nrow = 4)
+
+table2[1,1] = recid1A$beta[1]
+table2[2,1] = sqrt(diag(recid1A$vcov))[1]
+table2[3,1] = recid1B$beta[1]
+table2[4,1] = sqrt(diag(recid1B$vcov))[1]
+
+      
+table2[1,2] = recid2A$est[1]
+table2[2,2] = recid2A$se[1]
+table2[3,2] = recid2B$est[1]
+table2[4,2] = recid2B$se[1]
+
+      
+table2[1,3] = recid3A$est[1]
+table2[2,3] = recid3A$se[1]
+table2[3,3] = recid3B$est[1]
+table2[4,3] = recid3B$se[1]
+
+
+rownames(table2) = c("Panel A: Estimate","Panel A: Standard Error","Panel B: Estimate","Panel B: Standard Error")
+colnames(table2) = c("Linear","Linear at Cutoff", "Quadratic at Cutoff")
+
+kable(table2)
+```
+
+## 8
+
+```{r}
+
+dwi8 = dwi %>%
+  filter(bac1 <= .15)
+
+recid_lin = RDestimate(recidivism~bac1| male+white+aged+acc, data = dwi8, cutpoint = .08,bw = .05, kernel = "rectangular")
+recid_sq = RDestimate(recidivism~quad| male+white+aged+acc, data = dwi8, cutpoint = .08,bw = .05, kernel = "rectangular")
+
+### Linear
+plot(recid_lin)
+
+### Quadratic
+plot(recid_sq)
+
+
+```
+
+
+## 9
+
+I think the main thing that I learned from this exercse is how sensitive to econometritian specified constraints techniques can be. We find different results when we change bandwidth, kernel type, quadratic v linear. This makes it much more important to not just "do what the literature says" and instead look into the what your data really needs and what is appropriate in your setting. The hypothesis we are testing is that if getting a punishment for drunk driving, reduced future drunk driving. We do this by looking at those around the .08 BAC cutoff. I am pretty confident with Hansens conclusions. Its hard to argue with n = 512964 and a pretty solid identification strategy. Looking at his robustness checks, he dispells alot of the critques I would have had.
+
+
+
+
+
+
+
+
+
+
+
